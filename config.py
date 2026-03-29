@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Anthropic — primary provider
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
 
     # OpenAI — optional, kept for future use
     OPENAI_API_KEY: str = ""
