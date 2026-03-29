@@ -11,8 +11,8 @@ from utils.enums import AttachmentType, MessageDirection
 from utils.logger import logger
 
 _ONBOARDING_TEXT = (
-    "This bot is not configured for your account yet. "
-    "Please contact the event coordinator to get set up."
+    "Ciao, sono Sofia. Non sei ancora registrata nel sistema — "
+    "contatta il coordinatore per essere aggiunta."
 )
 
 
