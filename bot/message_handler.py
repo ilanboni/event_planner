@@ -140,14 +140,9 @@ async def handle_update(update: dict) -> None:
 
         if event is None:
             reply = _ONBOARDING_TEXT
-        elif msg.attachments:
-            names = [a.file_name or a.telegram_type.value for a in msg.attachments]
-            reply = f"File received: {', '.join(names)}. Processing will be available in the next phase."
-        elif msg.text:
-            # Phase 1: echo. Replace with pipeline.process(msg, event) in Phase 4.
-            reply = f"Received: {msg.text}"
         else:
-            reply = "Message received."
+            from orchestrator.pipeline import process
+            reply = await process(msg, event_id)
 
         await send_text(msg.chat_id, reply)
 
