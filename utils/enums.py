@@ -85,6 +85,7 @@ class FileType(str, Enum):
     LOGO = "logo"
     COLOR_REFERENCE = "color_reference"
     INSPIRATION_IMAGE = "inspiration_image"
+    INVITATION = "invitation"
     VENDOR_QUOTE = "vendor_quote"
     VENDOR_CONTRACT = "vendor_contract"
     GUEST_LIST = "guest_list"
