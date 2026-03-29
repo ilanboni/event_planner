@@ -96,7 +96,7 @@ class BaseAgent:
         )
         content = response.content[0].text
         logger.debug("%s raw response: %s…", self.__class__.__name__, content[:120])
-        return content
+        return _strip_code_fences(content)
 
     async def _anthropic_vision_call(
         self,
@@ -133,7 +133,7 @@ class BaseAgent:
         )
         content = response.content[0].text
         logger.debug("%s vision response: %s…", self.__class__.__name__, content[:120])
-        return content
+        return _strip_code_fences(content)
 
     # ── OpenAI ────────────────────────────────────────────────────────────────
 
@@ -193,3 +193,22 @@ class BaseAgent:
 
         response = await self._openai.chat.completions.create(**kwargs)
         return response.choices[0].message.content or ""
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _strip_code_fences(text: str) -> str:
+    """
+    Remove markdown code fences that some models wrap around JSON responses.
+    Handles ```json ... ```, ``` ... ```, and leading/trailing whitespace.
+    """
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        # Remove opening fence (with optional language tag)
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1:]
+        # Remove closing fence
+        if stripped.endswith("```"):
+            stripped = stripped[:-3]
+    return stripped.strip()
