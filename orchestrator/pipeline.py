@@ -3,7 +3,10 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agents.budget_agent import BudgetAgent
 from agents.lead_agent import LeadAgent, MemoryWrite, SynthesisResult
+from agents.space_agent import SpaceAgent
+from agents.timeline_agent import TimelineAgent
 from bot.message_handler import IncomingMessage
 from db.models import Message
 from db.session import AsyncSessionLocal
@@ -11,11 +14,14 @@ from memory import writer as mem_writer
 from memory.summary import serialize_files
 from orchestrator.context_loader import load_baseline, load_for_domains, to_prompt_string
 from orchestrator.router import RouterResult, route
-from services import decision_service, issue_service
+from services import budget_service, decision_service, issue_service
 from utils.logger import logger
 
-# Module-level singleton — one instance shared across all requests
+# Module-level singletons — one instance shared across all requests
 _lead_agent = LeadAgent()
+_budget_agent = BudgetAgent()
+_space_agent = SpaceAgent()
+_timeline_agent = TimelineAgent()
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -29,12 +35,16 @@ async def process(message: IncomingMessage, event_id: str) -> str:
       B  Deterministic routing
       C  Load baseline memory
       D  Lead Agent classification (if deterministic routing deferred)
-      E  Load full domain context
+      E  Refresh budget (if needed) + load full domain context
       F  Load recent conversation history
-      G  Lead Agent synthesis
-      H  Execute memory writes
-      I  Update context summary
-      J  Return response text
+      G  Serialise context once; run specialist agents for active domains
+         G1  Budget Specialist   (budget / vendor messages)
+         G2  Space Specialist    (space / layout messages)
+         G3  Timeline Specialist (timeline / pacing messages)
+      H  Lead Agent synthesis
+      I  Execute memory writes
+      J  Update context summary
+      K  Return response text
     """
     async with AsyncSessionLocal() as session:
         try:
@@ -82,7 +92,14 @@ async def _run(
     else:
         domains = router_result.domains_involved
 
-    # ── E: Load full domain context ───────────────────────────────────────────
+    # ── E: Refresh budget calculations then load full domain context ──────────
+    # Recalculate before loading so the context reflects current vendor totals.
+    if any(d in ("budget", "vendors") for d in domains):
+        try:
+            await budget_service.recalculate(session, event_id)
+        except Exception as exc:
+            logger.warning("Budget recalculate failed: %s", exc)
+
     full_context = await load_for_domains(session, event_id, domains)
 
     # Inject archivist output into context summary if files are pending
@@ -94,20 +111,68 @@ async def _run(
     # ── F: Recent conversation history ────────────────────────────────────────
     recent_messages = await _load_recent_messages(session, event_id)
 
-    # ── G: Lead Agent synthesis ───────────────────────────────────────────────
+    # ── G: Specialist analysis ────────────────────────────────────────────────
+    # Serialise context once — shared by every specialist and by synthesis.
+    # Each specialist returns a structured briefing; none writes to memory
+    # and none produces a user-facing response on its own.
     full_context_str = to_prompt_string(full_context)
+    specialist_outputs: dict[str, dict] = {}
+
+    # G1: Budget Specialist ───────────────────────────────────────────────────
+    if any(d in ("budget", "vendors") for d in domains):
+        budget_analysis = await _budget_agent.analyze(
+            message_text=message.text or "",
+            budget_context=full_context_str,
+        )
+        specialist_outputs["budget"] = budget_analysis.to_dict()
+        logger.info(
+            "Budget Agent: status=%s flags=%s",
+            budget_analysis.budget_status,
+            budget_analysis.flags,
+        )
+
+    # G2: Space Specialist ────────────────────────────────────────────────────
+    if "space" in domains:
+        space_analysis = await _space_agent.analyze(
+            message_text=message.text or "",
+            space_context=full_context_str,
+        )
+        specialist_outputs["space"] = space_analysis.to_dict()
+        logger.info(
+            "Space Agent: flags=%s",
+            space_analysis.flags,
+        )
+
+    # G3: Timeline Specialist ─────────────────────────────────────────────────
+    # Runs only when "timeline" is explicitly in the domains list.
+    # Space and entertainment domains load timeline data for context but are
+    # handled by their own specialists and the Lead Agent respectively.
+    if "timeline" in domains:
+        timeline_analysis = await _timeline_agent.analyze(
+            message_text=message.text or "",
+            timeline_context=full_context_str,
+        )
+        specialist_outputs["timeline"] = timeline_analysis.to_dict()
+        logger.info(
+            "Timeline Agent: conflicts=%s flags=%s",
+            timeline_analysis.conflicts,
+            timeline_analysis.flags,
+        )
+
+    # ── H: Lead Agent synthesis ───────────────────────────────────────────────
     synthesis: SynthesisResult = await _lead_agent.synthesize(
         message_text=message.text or "",
         full_context=full_context_str,
         archivist_output=archivist_output,
         recent_messages=recent_messages,
+        specialist_outputs=specialist_outputs or None,
     )
 
-    # ── H: Execute memory writes ──────────────────────────────────────────────
+    # ── I: Execute memory writes ──────────────────────────────────────────────
     if synthesis.memory_writes:
         await _execute_memory_writes(session, event_id, synthesis.memory_writes)
 
-    # ── I: Update context summary ─────────────────────────────────────────────
+    # ── J: Update context summary ─────────────────────────────────────────────
     if synthesis.context_summary_update:
         try:
             await mem_writer.update_working_notes_summary(
@@ -116,7 +181,7 @@ async def _run(
         except Exception as exc:
             logger.warning("Failed to update context summary: %s", exc)
 
-    # ── J: Return response ────────────────────────────────────────────────────
+    # ── K: Return response ────────────────────────────────────────────────────
     return synthesis.response_text
 
 

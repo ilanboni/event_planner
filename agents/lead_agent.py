@@ -98,6 +98,7 @@ class LeadAgent(BaseAgent):
         full_context: str,
         archivist_output: dict | None = None,
         recent_messages: list[str] | None = None,
+        specialist_outputs: dict[str, dict] | None = None,
     ) -> SynthesisResult:
         """
         Generate the final user response and memory write instructions.
@@ -114,6 +115,7 @@ class LeadAgent(BaseAgent):
             message_text=message_text,
             archivist_output=archivist_output,
             recent_messages=recent_messages,
+            specialist_outputs=specialist_outputs,
         )
 
         try:
@@ -182,16 +184,31 @@ def _parse_synthesis_result(raw: str) -> SynthesisResult:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+# Human-readable section headers for each specialist.
+# Add an entry here whenever a new specialist is integrated.
+_SPECIALIST_LABELS: dict[str, str] = {
+    "budget":   "BUDGET SPECIALIST ANALYSIS",
+    "space":    "SPACE SPECIALIST ANALYSIS",
+    "timeline": "TIMELINE SPECIALIST ANALYSIS",
+}
+
+
 def _build_synthesis_user_message(
     full_context: str,
     message_text: str,
     archivist_output: dict | None,
     recent_messages: list[str] | None,
+    specialist_outputs: dict[str, dict] | None = None,
 ) -> str:
     parts: list[str] = [f"FULL EVENT MEMORY:\n{full_context}"]
 
     if recent_messages:
         parts.append("RECENT CONVERSATION (oldest first):\n" + "\n".join(recent_messages))
+
+    if specialist_outputs:
+        for name, data in specialist_outputs.items():
+            label = _SPECIALIST_LABELS.get(name, f"{name.upper()} SPECIALIST ANALYSIS")
+            parts.append(f"{label}:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
 
     if archivist_output:
         parts.append(
