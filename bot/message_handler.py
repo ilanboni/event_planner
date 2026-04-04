@@ -11,7 +11,7 @@ from utils.enums import AttachmentType, MessageDirection
 from utils.logger import logger
 
 _ONBOARDING_TEXT = (
-    "Ciao, sono Sofia. Non sei ancora registrata nel sistema — "
+    "Ciao, sono Marcy. Non sei ancora registrata nel sistema — "
     "contatta il coordinatore per essere aggiunta."
 )
 
